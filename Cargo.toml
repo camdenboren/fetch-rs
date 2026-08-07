@@ -1,0 +1,9 @@
+[package]
+name = "fetch-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = "0.4.45"
+octocrab = "0.54.1"
+tokio = { version = "1.53.1", features = ["full"] }
