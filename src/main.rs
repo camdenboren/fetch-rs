@@ -21,6 +21,64 @@ fn cfg_dir() -> String {
     return format!("{}/etc/nixos", home_dir);
 }
 
+/// Determine whether the machine should be rebuilt by comparing the date
+/// of the latest remote commit vs. the latest local commit
+async fn should_rebuild(
+    octocrab: Octocrab,
+    latest_remote_date: DateTime<Utc>,
+    status: &str,
+) -> Result<bool, octocrab::Error> {
+    let cfg_dir = cfg_dir();
+    let latest_local = Command::new("git")
+        .args(["-C", cfg_dir.as_ref(), "rev-parse", "HEAD"])
+        .output()
+        .expect("Unable to get rev of latest_local commit");
+    let latest_local = String::from_utf8(latest_local.stdout)
+        .expect("Unable to stringify latest_local commit's rev");
+    let latest_local = latest_local.trim();
+
+    // grabs the local computer's stored time of the git commit in case
+    // we can't grab it remotely
+    let latest_local_date_backup = Command::new("git")
+        .args([
+            "-C",
+            cfg_dir.as_ref(),
+            "show",
+            "-s",
+            "--format=%ci",
+            latest_local,
+        ])
+        .output()
+        .expect("Unable to get rev of latest_local commit");
+    let latest_local_date_backup = String::from_utf8(latest_local_date_backup.stdout)
+        .expect("Unable to stringify latest_local commit's rev");
+    let latest_local_date_backup = latest_local_date_backup.trim();
+
+    // Attempt to fetch the local commit's metadata from github, falling
+    // back to `latest_local_date_backup` if any step fails
+    let latest_local_date: DateTime<Utc> =
+        match octocrab.commits(OWNER, REPO).get(latest_local).await {
+            Ok(commit) => commit.commit.author.unwrap().date.unwrap(),
+            Err(_) => {
+                chrono::DateTime::parse_from_str(latest_local_date_backup, "%Y-%m-%d %H:%M:%S %z")
+                    .expect("Failed to parse fallback local commit date")
+                    .with_timezone(&Utc)
+            }
+        };
+
+    let mut rebuild = false;
+    if latest_remote_date > latest_local_date {
+        rebuild = true;
+    }
+
+    println!("Latest remote commit time: {}", latest_remote_date);
+    println!("Latest local commit time: {}\n", latest_local_date);
+    println!("All actions succeeded on latest remote commit: {}", status);
+    println!("Rebuilding on latest remote commit: {}", rebuild);
+
+    Ok(rebuild)
+}
+
 /// Switch to the main branch, fetch the most recent commit, and rebuild via nh
 fn fetch_and_rebuild() {
     let cfg_dir = cfg_dir();
@@ -84,7 +142,6 @@ fn fetch_and_rebuild() {
 
 #[tokio::main]
 async fn main() -> octocrab::Result<()> {
-    let cfg_dir = cfg_dir();
     let octocrab = Octocrab::builder().build()?;
     let latest_remote = octocrab
         .repos(OWNER, REPO)
@@ -107,63 +164,13 @@ async fn main() -> octocrab::Result<()> {
             .send()
             .await?;
 
-        // needs a refactor
         if let Some(run) = latest_run.items.get(0) {
             let status = run.clone().conclusion.unwrap_or("".into());
             let status = status.as_ref();
 
             match status {
                 "success" => {
-                    let latest_local = Command::new("git")
-                        .args(["-C", cfg_dir.as_ref(), "rev-parse", "HEAD"])
-                        .output()
-                        .expect("Unable to get rev of latest_local commit");
-                    let latest_local = String::from_utf8(latest_local.stdout)
-                        .expect("Unable to stringify latest_local commit's rev");
-                    let latest_local = latest_local.trim();
-
-                    // grabs the local computer's stored time of the git commit in case
-                    // we can't grab it remotely
-                    let latest_local_date_backup = Command::new("git")
-                        .args([
-                            "-C",
-                            cfg_dir.as_ref(),
-                            "show",
-                            "-s",
-                            "--format=%ci",
-                            latest_local,
-                        ])
-                        .output()
-                        .expect("Unable to get rev of latest_local commit");
-                    let latest_local_date_backup =
-                        String::from_utf8(latest_local_date_backup.stdout)
-                            .expect("Unable to stringify latest_local commit's rev");
-                    let latest_local_date_backup = latest_local_date_backup.trim();
-
-                    // Attempt to fetch the local commit's metadata from github, falling
-                    // back to `latest_local_date_backup` if any step fails
-                    let latest_local_date: DateTime<Utc> =
-                        match octocrab.commits(OWNER, REPO).get(latest_local).await {
-                            Ok(commit) => commit.commit.author.unwrap().date.unwrap(),
-                            Err(_) => chrono::DateTime::parse_from_str(
-                                latest_local_date_backup,
-                                "%Y-%m-%d %H:%M:%S %z",
-                            )
-                            .expect("Failed to parse fallback local commit date")
-                            .with_timezone(&Utc),
-                        };
-
-                    let mut rebuild = false;
-                    if latest_remote_date > latest_local_date {
-                        rebuild = true;
-                    }
-
-                    println!("Latest remote commit time: {}", latest_remote_date);
-                    println!("Latest local commit time: {}\n", latest_local_date);
-                    println!("All actions succeeded on latest remote commit: {}", status);
-                    println!("Rebuilding on latest remote commit: {}", rebuild);
-
-                    if rebuild {
+                    if should_rebuild(octocrab, latest_remote_date, status).await? {
                         fetch_and_rebuild();
                     }
                 }
