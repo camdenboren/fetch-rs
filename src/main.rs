@@ -11,29 +11,31 @@ use std::{
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
+    flake_dir: String,
     owner: String,
     repo: String,
     branch: String,
     workflow: String,
-    nh_cmd: String,
-    nh_system: String,
+    rebuild_system: String,
+    rebuild_cmd: String,
     notify: bool,
     ntfy_url: String,
     ntfy_topic: String,
 }
 
 impl Config {
-    fn new(owner: &str, repo: &str) -> Self {
+    fn new(flake_dir: &str, owner: &str, repo: &str) -> Self {
         Config {
+            flake_dir: flake_dir.into(),
             owner: owner.into(),
             repo: repo.into(),
             branch: "main".into(),
             workflow: "build.yaml".into(),
-            nh_cmd: "switch".into(),
             #[cfg(not(target_os = "macos"))]
-            nh_system: "os".into(),
+            rebuild_system: "nixos".into(),
             #[cfg(target_os = "macos")]
-            nh_system: "darwin".into(),
+            rebuild_system: "darwin".into(),
+            rebuild_cmd: "switch".into(),
             notify: false,
             ntfy_url: "ntfy.sh".into(),
             ntfy_topic: "".into(),
@@ -46,14 +48,14 @@ impl Config {
             Ok(config) => config,
             Err(_) => {
                 println!();
-                Config::new("", "")
+                Config::new("", "", "")
             }
         }
     }
 
     /// Serialize the raw configuration content
-    fn serialize(owner: &str, repo: &str) -> String {
-        let config = Config::new(owner, repo);
+    fn serialize(flake_dir: &str, owner: &str, repo: &str) -> String {
+        let config = Config::new(flake_dir, owner, repo);
         toml::to_string(&config).unwrap_or_default()
     }
 
@@ -83,8 +85,11 @@ impl Config {
         println!(
             "Running first time setup-let's start with some basic info on your GitHub-based nix config\n"
         );
-        let config_content =
-            Config::serialize(&user_input("Repo Owner: "), &user_input("\nRepo Name: "));
+        let config_content = Config::serialize(
+            &user_input("Flake Directory: "),
+            &user_input("\nRepo Owner: "),
+            &user_input("\nRepo Name: "),
+        );
         let path = dirs::config_dir().unwrap_or_default().join("fetch-rs");
         if std::fs::metadata(&path).is_err() {
             match std::fs::create_dir(&path) {
@@ -106,11 +111,17 @@ impl Config {
 }
 
 /// Retrieve the NixOS / nix-darwin config directory
-fn nix_cfg_dir(cfg: Config) -> String {
-    let default_home_dir = format!("/home/{}", cfg.owner);
-    let home_dir = env::home_dir().unwrap_or(default_home_dir.clone().into());
-    let home_dir = home_dir.to_str().unwrap_or(default_home_dir.as_str());
-    format!("{}/etc/nixos", home_dir)
+fn flake_dir(cfg: Config) -> String {
+    let mut flake_dir = cfg.flake_dir;
+    if flake_dir.starts_with("~") {
+        let default_home_dir = format!("/home/{}", cfg.owner);
+        let home_dir = env::home_dir().unwrap_or(default_home_dir.clone().into());
+        let home_dir = home_dir.to_str().unwrap_or(default_home_dir.as_str());
+        flake_dir.remove(0);
+        format!("{}{}", home_dir, flake_dir)
+    } else {
+        flake_dir
+    }
 }
 
 /// Prompt the user for input and return it
@@ -160,9 +171,9 @@ async fn should_rebuild(
     latest_remote_date: DateTime<Utc>,
     status: &str,
 ) -> Result<bool, octocrab::Error> {
-    let nix_cfg_dir = nix_cfg_dir(cfg.clone());
+    let flake_dir = flake_dir(cfg.clone());
     let latest_local = Command::new("git")
-        .args(["-C", nix_cfg_dir.as_ref(), "rev-parse", "HEAD"])
+        .args(["-C", flake_dir.as_ref(), "rev-parse", "HEAD"])
         .output()
         .expect("Unable to get rev of latest_local commit");
     let latest_local = String::from_utf8(latest_local.stdout)
@@ -174,7 +185,7 @@ async fn should_rebuild(
     let latest_local_date_backup = Command::new("git")
         .args([
             "-C",
-            nix_cfg_dir.as_ref(),
+            flake_dir.as_ref(),
             "show",
             "-s",
             "--format=%ci",
@@ -208,7 +219,7 @@ async fn should_rebuild(
     let local_branch = Command::new("git")
         .args([
             "-C",
-            nix_cfg_dir.as_ref(),
+            flake_dir.as_ref(),
             "rev-parse",
             "--abbrev-ref",
             "HEAD",
@@ -236,12 +247,12 @@ async fn should_rebuild(
     Ok(rebuild)
 }
 
-/// Switch to the main branch, fetch the most recent commit, and rebuild via nh
+/// Switch to the main branch, fetch the most recent commit, and rebuild
 fn fetch_and_rebuild(cfg: Config) {
-    let nix_cfg_dir = nix_cfg_dir(cfg.clone());
+    let flake_dir = flake_dir(cfg.clone());
     println!("\nSwitching to {}", cfg.branch);
     let switch_output = Command::new("git")
-        .args(["-C", nix_cfg_dir.as_ref(), "switch", cfg.branch.as_ref()])
+        .args(["-C", flake_dir.as_ref(), "switch", cfg.branch.as_ref()])
         .output()
         .expect("Failed to switch branches");
     if switch_output.status.success() {
@@ -263,7 +274,7 @@ fn fetch_and_rebuild(cfg: Config) {
 
     println!("Fetching latest commit on {}", cfg.branch);
     let fetch_output = Command::new("git")
-        .args(["-C", nix_cfg_dir.as_ref(), "fetch"])
+        .args(["-C", flake_dir.as_ref(), "fetch"])
         .output()
         .expect("Failed to fetch latest commit");
     if fetch_output.status.success() {
@@ -285,20 +296,20 @@ fn fetch_and_rebuild(cfg: Config) {
 
     // `spawn()` would probably enable visualizing this
     println!("Rebuilding");
-    let nh_output = Command::new("nh")
-        .args([cfg.nh_system.clone(), cfg.nh_cmd.clone()])
+    let rebuild_output = Command::new(format!("{}-rebuild", cfg.rebuild_system))
+        .args([cfg.rebuild_cmd.clone(), "--flake".into(), flake_dir])
         .output()
         .expect("Failed to rebuild");
-    if nh_output.status.success() {
-        let nh_output_stdout =
-            String::from_utf8(nh_output.stdout).expect("Unable to stringify nh_output");
-        println!("  {}", nh_output_stdout);
+    if rebuild_output.status.success() {
+        let rebuild_output_stdout =
+            String::from_utf8(rebuild_output.stdout).expect("Unable to stringify rebuild_output");
+        println!("  {}", rebuild_output_stdout);
     } else {
-        let nh_output_stderr =
-            String::from_utf8(nh_output.stderr).expect("Unable to stringify nh_output");
+        let rebuild_output_stderr =
+            String::from_utf8(rebuild_output.stderr).expect("Unable to stringify rebuild_output");
         println!(
             "  Error encountered while rebuilding, doing nothing: {}",
-            nh_output_stderr
+            rebuild_output_stderr
         );
         if cfg.notify {
             notify(cfg);
