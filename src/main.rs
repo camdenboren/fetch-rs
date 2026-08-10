@@ -30,7 +30,10 @@ impl Config {
             branch: "main".into(),
             workflow: "build.yaml".into(),
             nh_cmd: "switch".into(),
+            #[cfg(not(target_os = "macos"))]
             nh_system: "os".into(),
+            #[cfg(target_os = "macos")]
+            nh_system: "darwin".into(),
             notify: false,
             ntfy_url: "ntfy.sh".into(),
             ntfy_topic: "".into(),
