@@ -78,7 +78,7 @@ impl Config {
     /// config file
     fn write() {
         println!(
-            "Running first time setup-let's start with some basic info on your github-based nix config\n"
+            "Running first time setup-let's start with some basic info on your GitHub-based nix config\n"
         );
         let config_content =
             Config::serialize(&user_input("Repo Owner: "), &user_input("\nRepo Name: "));
@@ -198,8 +198,26 @@ async fn should_rebuild(
         }
     };
 
+    // Grab the name of the local branch so we can determine whether
+    // main has been fast-forwarded from it (i.e., we want to rebuild
+    // if this is the case, but we DON'T want to rebuild if we're already
+    // on an up-to-date main)
+    let local_branch = Command::new("git")
+        .args([
+            "-C",
+            nix_cfg_dir.as_ref(),
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
+        ])
+        .output()
+        .expect("Unable to get name of local branch");
+    let local_branch =
+        String::from_utf8(local_branch.stdout).expect("Unable to stringify name of local branch");
+    let local_branch = local_branch.trim();
+
     let mut rebuild = false;
-    if latest_remote_date >= latest_local_date {
+    if latest_remote_date >= latest_local_date && local_branch != cfg.branch {
         rebuild = true;
     }
 
