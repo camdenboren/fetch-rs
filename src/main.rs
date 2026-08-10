@@ -217,7 +217,11 @@ async fn should_rebuild(
     let local_branch = local_branch.trim();
 
     let mut rebuild = false;
-    if latest_remote_date >= latest_local_date && local_branch != cfg.branch {
+    // rebuild when local is any branch other than main AND there's a commit that's at least as new
+    // OR when local branch is main and there's a commit that's strictly newer
+    if (local_branch != cfg.branch && latest_remote_date >= latest_local_date)
+        || (local_branch == cfg.branch && latest_remote_date > latest_local_date)
+    {
         rebuild = true;
     }
 
