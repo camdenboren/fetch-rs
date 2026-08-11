@@ -1,167 +1,10 @@
 use chrono::prelude::*;
-use octocrab::Octocrab;
-use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::{
-    env,
-    fs::{File, write},
-    io::{Read, stdin},
-    path::PathBuf,
+use fetch_rs::{
+    config::{Config, flake_dir},
+    util::*,
 };
-
-#[derive(Serialize, Deserialize, Clone)]
-struct Config {
-    flake_dir: String,
-    owner: String,
-    repo: String,
-    branch: String,
-    workflow: String,
-    rebuild_system: String,
-    rebuild_cmd: String,
-    notify: bool,
-    ntfy_url: String,
-    ntfy_topic: String,
-}
-
-impl Config {
-    fn new(flake_dir: &str, owner: &str, repo: &str) -> Self {
-        Config {
-            flake_dir: flake_dir.into(),
-            owner: owner.into(),
-            repo: repo.into(),
-            branch: "main".into(),
-            workflow: "build.yaml".into(),
-            #[cfg(not(target_os = "macos"))]
-            rebuild_system: "nixos".into(),
-            #[cfg(target_os = "macos")]
-            rebuild_system: "darwin".into(),
-            rebuild_cmd: "switch".into(),
-            notify: false,
-            ntfy_url: "ntfy.sh".into(),
-            ntfy_topic: "".into(),
-        }
-    }
-
-    /// Deserialize the raw configuration content
-    fn deserialize(config_content: String) -> Self {
-        match toml::from_str(&config_content) {
-            Ok(config) => config,
-            Err(_) => {
-                println!();
-                Config::new("", "", "")
-            }
-        }
-    }
-
-    /// Serialize the raw configuration content
-    fn serialize(flake_dir: &str, owner: &str, repo: &str) -> String {
-        let config = Config::new(flake_dir, owner, repo);
-        toml::to_string(&config).unwrap_or_default()
-    }
-
-    /// Read the raw configuration content at the given path, creating the file if needed.
-    fn read(path: PathBuf) -> Result<String, anyhow::Error> {
-        let file_path = path.join("config.toml");
-        if std::fs::metadata(&file_path).is_err() {
-            Config::write();
-        }
-
-        let mut config_file = File::open(file_path)?;
-        let mut config_content = String::new();
-        match config_file.read_to_string(&mut config_content) {
-            Ok(_) => (),
-            Err(_) => {
-                config_content = String::from("");
-                println!();
-            }
-        }
-
-        Ok(config_content)
-    }
-
-    /// Write the default configuration content to the
-    /// config file
-    fn write() {
-        println!(
-            "Running first time setup-let's start with some basic info on your GitHub-based nix config\n"
-        );
-        let config_content = Config::serialize(
-            &user_input("Flake Directory: "),
-            &user_input("\nRepo Owner: "),
-            &user_input("\nRepo Name: "),
-        );
-        let path = dirs::config_dir().unwrap_or_default().join("fetch-rs");
-        if std::fs::metadata(&path).is_err() {
-            match std::fs::create_dir(&path) {
-                Ok(_) => (),
-                Err(_) => println!(),
-            }
-        }
-        if std::fs::metadata(path.join("config.toml")).is_err() {
-            match write(path.join("config.toml"), &config_content) {
-                Ok(_) => (),
-                Err(_) => println!("Failed to create config file"),
-            }
-            println!(
-                "\nWrote initial config to: {}\nFeel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)\n",
-                path.join("config.toml").display()
-            )
-        }
-    }
-}
-
-/// Retrieve the NixOS / nix-darwin config directory
-fn flake_dir(cfg: Config) -> String {
-    let mut flake_dir = cfg.flake_dir;
-    if flake_dir.starts_with("~") {
-        let default_home_dir = format!("/home/{}", cfg.owner);
-        let home_dir = env::home_dir().unwrap_or(default_home_dir.clone().into());
-        let home_dir = home_dir.to_str().unwrap_or(default_home_dir.as_str());
-        flake_dir.remove(0);
-        format!("{}{}", home_dir, flake_dir)
-    } else {
-        flake_dir
-    }
-}
-
-/// Prompt the user for input and return it
-fn user_input(message: &str) -> String {
-    println!("{}", message);
-    let mut buffer = String::new();
-    let stdin = stdin(); // We get `Stdin` here.
-    stdin.read_line(&mut buffer).unwrap();
-    buffer.trim().into()
-}
-
-/// Send a notification via ntfy-sh
-fn notify(cfg: Config) {
-    let url = format!("{}/{}", cfg.ntfy_url, cfg.ntfy_topic);
-    let mut url_sequence: Vec<&str> = Vec::new();
-    if url.contains("https") {
-        url_sequence.push("-L");
-    }
-    url_sequence.push(url.as_ref());
-    let mut args = vec!["-d", "Rebuild failed"];
-    args.append(&mut url_sequence);
-
-    println!("Notifying via ntfy-sh server at: {}", url);
-    let notify_output = Command::new("curl")
-        .args(args)
-        .output()
-        .expect("Failed to notify");
-    if notify_output.status.success() {
-        let notify_output_stdout =
-            String::from_utf8(notify_output.stdout).expect("Unable to stringify notify_output");
-        println!("  {}", notify_output_stdout);
-    } else {
-        let notify_output_stderr =
-            String::from_utf8(notify_output.stderr).expect("Unable to stringify notify_output");
-        println!(
-            "  Error encountered while rebuilding, doing nothing: {}",
-            notify_output_stderr
-        );
-    }
-}
+use octocrab::Octocrab;
+use std::process::Command;
 
 /// Determine whether the machine should be rebuilt by comparing the date
 /// of the latest remote commit vs. the latest local commit
@@ -247,8 +90,8 @@ async fn should_rebuild(
     Ok(rebuild)
 }
 
-/// Switch to the main branch, fetch the most recent commit, and rebuild
-fn fetch_and_rebuild(cfg: Config) {
+/// Switch to the main branch and fetch the most recent commit
+fn switch_and_fetch(cfg: Config) {
     let flake_dir = flake_dir(cfg.clone());
     println!("\nSwitching to {}", cfg.branch);
     let switch_output = Command::new("git")
@@ -291,29 +134,6 @@ fn fetch_and_rebuild(cfg: Config) {
         if cfg.notify {
             notify(cfg);
         }
-        return;
-    }
-
-    // `spawn()` would probably enable visualizing this
-    println!("Rebuilding");
-    let rebuild_output = Command::new(format!("{}-rebuild", cfg.rebuild_system))
-        .args([cfg.rebuild_cmd.clone(), "--flake".into(), flake_dir])
-        .output()
-        .expect("Failed to rebuild");
-    if rebuild_output.status.success() {
-        let rebuild_output_stdout =
-            String::from_utf8(rebuild_output.stdout).expect("Unable to stringify rebuild_output");
-        println!("  {}", rebuild_output_stdout);
-    } else {
-        let rebuild_output_stderr =
-            String::from_utf8(rebuild_output.stderr).expect("Unable to stringify rebuild_output");
-        println!(
-            "  Error encountered while rebuilding, doing nothing: {}",
-            rebuild_output_stderr
-        );
-        if cfg.notify {
-            notify(cfg);
-        }
     }
 }
 
@@ -352,7 +172,7 @@ async fn main() -> octocrab::Result<()> {
             match status {
                 "success" => {
                     if should_rebuild(cfg.clone(), octocrab, latest_remote_date, status).await? {
-                        fetch_and_rebuild(cfg);
+                        switch_and_fetch(cfg);
                     }
                 }
                 "failure" => println!("Workflow failed: doing nothing."),
