@@ -1,10 +1,13 @@
 use chrono::prelude::*;
 use fetch_rs::{
-    config::{Config, flake_dir},
-    util::*,
+    config::{CFG_FILE, Config},
+    util::{ExitCode, notify},
 };
 use octocrab::Octocrab;
-use std::process::Command;
+use std::{
+    path::PathBuf,
+    process::{Command, exit},
+};
 
 /// Determine whether the machine should be rebuilt by comparing the date
 /// of the latest remote commit vs. the latest local commit
@@ -14,9 +17,9 @@ async fn should_rebuild(
     latest_remote_date: DateTime<Utc>,
     status: &str,
 ) -> Result<bool, octocrab::Error> {
-    let flake_dir = flake_dir(cfg.clone());
+    let flake_dir = cfg.flake_dir.as_ref();
     let latest_local = Command::new("git")
-        .args(["-C", flake_dir.as_ref(), "rev-parse", "HEAD"])
+        .args(["-C", flake_dir, "rev-parse", "HEAD"])
         .output()
         .expect("Unable to get rev of latest_local commit");
     let latest_local = String::from_utf8(latest_local.stdout)
@@ -26,14 +29,7 @@ async fn should_rebuild(
     // grabs the local computer's stored time of the git commit in case
     // we can't grab it remotely
     let latest_local_date_backup = Command::new("git")
-        .args([
-            "-C",
-            flake_dir.as_ref(),
-            "show",
-            "-s",
-            "--format=%ci",
-            latest_local,
-        ])
+        .args(["-C", flake_dir, "show", "-s", "--format=%ci", latest_local])
         .output()
         .expect("Unable to get rev of latest_local commit");
     let latest_local_date_backup = String::from_utf8(latest_local_date_backup.stdout)
@@ -60,13 +56,7 @@ async fn should_rebuild(
     // if this is the case, but we DON'T want to rebuild if we're already
     // on an up-to-date main)
     let local_branch = Command::new("git")
-        .args([
-            "-C",
-            flake_dir.as_ref(),
-            "rev-parse",
-            "--abbrev-ref",
-            "HEAD",
-        ])
+        .args(["-C", flake_dir, "rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .expect("Unable to get name of local branch");
     let local_branch =
@@ -92,10 +82,10 @@ async fn should_rebuild(
 
 /// Switch to the main branch and fetch the most recent commit
 fn switch_and_fetch(cfg: Config) {
-    let flake_dir = flake_dir(cfg.clone());
+    let flake_dir = cfg.flake_dir.as_ref();
     println!("\nSwitching to {}", cfg.branch);
     let switch_output = Command::new("git")
-        .args(["-C", flake_dir.as_ref(), "switch", cfg.branch.as_ref()])
+        .args(["-C", flake_dir, "switch", cfg.branch.as_ref()])
         .output()
         .expect("Failed to switch branches");
     if switch_output.status.success() {
@@ -105,19 +95,19 @@ fn switch_and_fetch(cfg: Config) {
     } else {
         let switch_output_stderr =
             String::from_utf8(switch_output.stderr).expect("Unable to stringify switch_output");
-        println!(
+        eprintln!(
             "  Error encountered while switching branches, doing nothing: {}",
             switch_output_stderr
         );
         if cfg.notify {
             notify(cfg);
         }
-        return;
+        exit(ExitCode::Failure.into());
     }
 
     println!("Fetching latest commit on {}", cfg.branch);
     let fetch_output = Command::new("git")
-        .args(["-C", flake_dir.as_ref(), "fetch"])
+        .args(["-C", flake_dir, "fetch"])
         .output()
         .expect("Failed to fetch latest commit");
     if fetch_output.status.success() {
@@ -127,19 +117,20 @@ fn switch_and_fetch(cfg: Config) {
     } else {
         let fetch_output_stderr =
             String::from_utf8(fetch_output.stderr).expect("Unable to stringify fetch_output");
-        println!(
+        eprintln!(
             "  Error encountered while fetching latest, doing nothing: {}",
             fetch_output_stderr
         );
         if cfg.notify {
             notify(cfg);
         }
+        exit(ExitCode::Failure.into());
     }
 }
 
 #[tokio::main]
 async fn main() -> octocrab::Result<()> {
-    let path = dirs::config_dir().unwrap_or_default().join("fetch-rs");
+    let path = PathBuf::from(CFG_FILE);
     let config_content = Config::read(path.clone()).unwrap_or("".into());
     let cfg = Config::deserialize(config_content);
 
@@ -173,16 +164,26 @@ async fn main() -> octocrab::Result<()> {
                 "success" => {
                     if should_rebuild(cfg.clone(), octocrab, latest_remote_date, status).await? {
                         switch_and_fetch(cfg);
+                    } else {
+                        exit(ExitCode::NoOp.into())
                     }
                 }
-                "failure" => println!("Workflow failed: doing nothing."),
-                _ => println!("Unknown status for workflow: doing nothing."),
+                "failure" => {
+                    eprintln!("Workflow failed: doing nothing.");
+                    exit(ExitCode::NoOp.into())
+                }
+                _ => {
+                    eprintln!("Unknown status for workflow: doing nothing.");
+                    exit(ExitCode::NoOp.into())
+                }
             }
         } else {
-            println!("No run found: doing nothing.");
+            eprintln!("No run found: doing nothing.");
+            exit(ExitCode::NoOp.into())
         }
     } else {
-        println!("No commits found: doing nothing.");
+        eprintln!("No commits found: doing nothing.");
+        exit(ExitCode::NoOp.into())
     }
 
     Ok(())

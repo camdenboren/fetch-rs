@@ -1,15 +1,12 @@
 use crate::util::user_input;
 use serde::{Deserialize, Serialize};
-use std::{
-    env,
-    fs::{File, write},
-    io::Read,
-    path::PathBuf,
-};
+use std::{env, fs::File, io::Read, path::PathBuf, process::exit};
+
+pub const CFG_FILE: &str = "/etc/fetch-rs/config.toml";
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
-    flake_dir: String,
+    pub flake_dir: String,
     pub owner: String,
     pub repo: String,
     pub branch: String,
@@ -45,7 +42,7 @@ impl Config {
         match toml::from_str(&config_content) {
             Ok(config) => config,
             Err(_) => {
-                println!();
+                eprintln!();
                 Config::new("", "", "")
             }
         }
@@ -59,65 +56,54 @@ impl Config {
 
     /// Read the raw configuration content at the given path, creating the file if needed.
     pub fn read(path: PathBuf) -> Result<String, anyhow::Error> {
-        let file_path = path.join("config.toml");
-        if std::fs::metadata(&file_path).is_err() {
-            Config::write();
+        if std::fs::metadata(&path).is_err() {
+            Config::create();
+            exit(2)
         }
 
-        let mut config_file = File::open(file_path)?;
+        let mut config_file = File::open(path)?;
         let mut config_content = String::new();
         match config_file.read_to_string(&mut config_content) {
             Ok(_) => (),
             Err(_) => {
                 config_content = String::from("");
-                println!();
+                eprintln!();
             }
         }
 
         Ok(config_content)
     }
 
-    /// Write the default configuration content to the
-    /// config file
-    fn write() {
+    /// Create the default configuration content
+    fn create() {
         println!(
             "Running first time setup-let's start with some basic info on your GitHub-based nix config\n"
         );
-        let config_content = Config::serialize(
-            &user_input("Flake Directory: "),
-            &user_input("\nRepo Owner: "),
-            &user_input("\nRepo Name: "),
-        );
-        let path = dirs::config_dir().unwrap_or_default().join("fetch-rs");
-        if std::fs::metadata(&path).is_err() {
-            match std::fs::create_dir(&path) {
-                Ok(_) => (),
-                Err(_) => println!(),
-            }
-        }
-        if std::fs::metadata(path.join("config.toml")).is_err() {
-            match write(path.join("config.toml"), &config_content) {
-                Ok(_) => (),
-                Err(_) => println!("Failed to create config file"),
-            }
-            println!(
-                "\nWrote initial config to: {}\nFeel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)\n",
-                path.join("config.toml").display()
-            )
-        }
-    }
-}
+        let mut flake =
+            user_input("Flake Directory (`~` will be replaced with your current $HOME): ");
+        let owner = user_input("\nRepo Owner: ");
+        let repo = user_input("\nRepo Name: ");
+        flake = Self::flake_dir(flake, owner.clone());
+        let config_content = Config::serialize(&flake, &owner, &repo);
+        let path = PathBuf::from(CFG_FILE);
 
-/// Retrieve the NixOS / nix-darwin config directory
-pub fn flake_dir(cfg: Config) -> String {
-    let mut flake_dir = cfg.flake_dir;
-    if flake_dir.starts_with("~") {
-        let default_home_dir = format!("/home/{}", cfg.owner);
-        let home_dir = env::home_dir().unwrap_or(default_home_dir.clone().into());
-        let home_dir = home_dir.to_str().unwrap_or(default_home_dir.as_str());
-        flake_dir.remove(0);
-        format!("{}{}", home_dir, flake_dir)
-    } else {
-        flake_dir
+        println!(
+            "\nHere's your initial config:\n{}\nTo proceed, write it to: {}\nFeel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)",
+            config_content,
+            path.display()
+        )
+    }
+
+    /// Retrieve the NixOS / nix-darwin config directory
+    fn flake_dir(mut dir: String, owner: String) -> String {
+        if dir.starts_with("~") {
+            let fallback_home_dir = format!("/home/{}", owner);
+            let home_dir = env::home_dir().unwrap_or(fallback_home_dir.clone().into());
+            let home_dir = home_dir.to_str().unwrap_or(fallback_home_dir.as_str());
+            dir.remove(0);
+            format!("{}{}", home_dir, dir)
+        } else {
+            dir
+        }
     }
 }

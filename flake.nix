@@ -1,5 +1,5 @@
 {
-  description = "Rust Development Environment via Nix Flake";
+  description = "fetch-rs Development Environment via Nix Flake";
 
   nixConfig.bash-prompt = ''\n\[\033[1;31m\][devShell:\w]\$\[\033[0m\] '';
 
@@ -40,7 +40,7 @@
             ];
 
             shellHook = ''
-              echo -e "\nRust Development Environment via Nix Flake\n"
+              echo -e "\nfetch-rs Development Environment via Nix Flake\n"
 
               echo -e "┌───────────────────────────┐"
               echo -e "│      Useful Commands      │"
@@ -64,7 +64,7 @@
             pname = "fetch-rs";
             version = "0.1.0";
             src = ./.;
-            cargoHash = "sha256-LfCQRk9UqTRw76oPFYa3We2w9DWQ1qlRoYOMHOYEIMQ=";
+            cargoHash = "sha256-4MWfKflB6i07iiQs7IgIMcHmvBTuYHK//eHbmmzc2XE=";
           };
         }
       );
