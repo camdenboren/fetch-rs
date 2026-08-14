@@ -1,4 +1,4 @@
-use crate::util::user_input;
+use crate::util::{ExitCode, user_input};
 use serde::{Deserialize, Serialize};
 use std::{env, fs::File, io::Read, path::PathBuf, process::exit};
 
@@ -58,7 +58,7 @@ impl Config {
     pub fn read(path: PathBuf) -> Result<String, anyhow::Error> {
         if std::fs::metadata(&path).is_err() {
             Config::create();
-            exit(2)
+            exit(ExitCode::NoOp.into())
         }
 
         let mut config_file = File::open(path)?;
