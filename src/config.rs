@@ -1,8 +1,8 @@
-use crate::util::{ExitCode, user_input};
+use crate::{git::origin, util::ExitCode};
 use serde::{Deserialize, Serialize};
 use std::{env, fs::File, io::Read, path::PathBuf, process::exit};
 
-pub const CFG_FILE: &str = "/etc/fetch-rs/config.toml";
+pub const CFG_FILE: &str = "config.toml";
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -14,8 +14,6 @@ pub struct Config {
     pub rebuild_system: String,
     pub rebuild_cmd: String,
     pub notify: bool,
-    pub ntfy_url: String,
-    pub ntfy_topic: String,
 }
 
 impl Config {
@@ -32,8 +30,6 @@ impl Config {
             rebuild_system: "darwin".into(),
             rebuild_cmd: "switch".into(),
             notify: false,
-            ntfy_url: "ntfy.sh".into(),
-            ntfy_topic: "".into(),
         }
     }
 
@@ -42,7 +38,7 @@ impl Config {
         match toml::from_str(&config_content) {
             Ok(config) => config,
             Err(_) => {
-                eprintln!();
+                tracing::info!("Failed to deserialize configuration-passing the default");
                 Config::new("", "", "")
             }
         }
@@ -50,24 +46,30 @@ impl Config {
 
     /// Serialize the raw configuration content
     fn serialize(flake_dir: &str, owner: &str, repo: &str) -> String {
-        let config = Config::new(flake_dir, owner, repo);
+        // $F_RS_FLAKE takes precedence
+        let mut config = Config::new(flake_dir, owner, repo);
+        if let Ok(flake_var) = env::var("F_RS_FLAKE") {
+            config.flake_dir = Self::validate_flake_dir(flake_var);
+        }
         toml::to_string(&config).unwrap_or_default()
     }
 
     /// Read the raw configuration content at the given path, creating the file if needed.
     pub fn read(path: PathBuf) -> Result<String, anyhow::Error> {
         if std::fs::metadata(&path).is_err() {
-            Config::create();
-            exit(ExitCode::NoOp.into())
+            Config::write();
         }
 
-        let mut config_file = File::open(path)?;
+        let mut config_file = File::open(path.clone())?;
         let mut config_content = String::new();
         match config_file.read_to_string(&mut config_content) {
-            Ok(_) => (),
+            Ok(_) => tracing::info!("Read config content"),
             Err(_) => {
                 config_content = String::from("");
-                eprintln!();
+                tracing::error!(
+                    "Failed to parse the content of the configuration file at {} - defaulting to nothing",
+                    path.display()
+                );
             }
         }
 
@@ -75,33 +77,68 @@ impl Config {
     }
 
     /// Create the default configuration content
-    fn create() {
-        println!(
-            "Running first time setup-let's start with some basic info on your GitHub-based nix config\n"
-        );
-        let mut flake =
-            user_input("Flake Directory (`~` will be replaced with your current $HOME): ");
-        let owner = user_input("\nRepo Owner: ");
-        let repo = user_input("\nRepo Name: ");
-        flake = Self::flake_dir(flake, owner.clone());
-        let config_content = Config::serialize(&flake, &owner, &repo);
-        let path = PathBuf::from(CFG_FILE);
+    fn write() {
+        let flake = env::var("F_RS_FLAKE");
+        if flake.is_err() {
+            tracing::error!(
+                "Unable to read $F_RS_FLAKE-is it set? Failed to create initial config"
+            );
+            exit(ExitCode::NoOp.into());
+        }
+        let mut flake = flake.unwrap_or_default();
+        let cfg_dir = env::var("F_RS_CONFIG");
+        if cfg_dir.is_err() {
+            tracing::error!(
+                "Unable to read $F_RS_CONFIG-is it set? Failed to create initial config"
+            );
+            exit(ExitCode::NoOp.into());
+        }
+        let cfg_dir = PathBuf::from(cfg_dir.unwrap_or_default());
+        let cfg_path = cfg_dir.join(CFG_FILE);
+        flake = Self::validate_flake_dir(flake);
 
-        println!(
-            "\nHere's your initial config:\n{}\nTo proceed, write it to: {}\nFeel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)",
-            config_content,
-            path.display()
-        )
+        let origin = origin(flake.clone());
+        if origin.is_empty() {
+            tracing::error!("Repository URL has no owner or repo segment");
+            exit(ExitCode::NoOp.into());
+        }
+        let owner = origin.first().map_or_else(
+            || {
+                tracing::error!("Failed to extract author from repository URL");
+                exit(ExitCode::NoOp.into());
+            },
+            |s| s.clone(),
+        );
+        let repo = origin.last().map_or_else(
+            || {
+                tracing::error!("Failed to extract repository name from URL");
+                exit(ExitCode::NoOp.into());
+            },
+            |s| s.clone(),
+        );
+        let config_content = Config::serialize(&flake, &owner, &repo);
+
+        if std::fs::metadata(&cfg_dir).is_err() {
+            tracing::info!("Launched without access to the config directory");
+        }
+        if std::fs::metadata(cfg_path.clone()).is_err() {
+            match std::fs::write(cfg_path.clone(), &config_content) {
+                Ok(_) => tracing::info!(
+                    "Wrote initial config to: {} - feel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)",
+                    cfg_path.display()
+                ),
+                Err(_) => tracing::info!("Failed to create config file"),
+            }
+        }
     }
 
-    /// Retrieve the NixOS / nix-darwin config directory
-    fn flake_dir(mut dir: String, owner: String) -> String {
+    /// Make sure $F_RS_FLAKE doesn't include ambiguous `~`
+    fn validate_flake_dir(dir: String) -> String {
         if dir.starts_with("~") {
-            let fallback_home_dir = format!("/home/{}", owner);
-            let home_dir = env::home_dir().unwrap_or(fallback_home_dir.clone().into());
-            let home_dir = home_dir.to_str().unwrap_or(fallback_home_dir.as_str());
-            dir.remove(0);
-            format!("{}{}", home_dir, dir)
+            tracing::error!(
+                "Ambiguous $HOME included in $F_RS_FLAKE. As fetch-rs leverages multiple users, use an absolute path to avoid ambiguity"
+            );
+            exit(ExitCode::NoOp.into());
         } else {
             dir
         }

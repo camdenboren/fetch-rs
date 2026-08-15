@@ -7,10 +7,18 @@
     nixpkgs = {
       url = "github:nixos/nixpkgs/nixos-unstable";
     };
+    nix-darwin = {
+      url = "github:nix-darwin/nix-darwin";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { nixpkgs, ... }:
+    {
+      self,
+      nixpkgs,
+      nix-darwin,
+    }:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -27,46 +35,39 @@
         );
     in
     {
-      devShells = forEachSupportedSystem (
+      devShells = forEachSupportedSystem (import ./nix/shell.nix);
+      packages = forEachSupportedSystem (import ./nix/package.nix);
+      nixosModules = rec {
+        default = fetch-rs;
+        fetch-rs = import ./nix/nixos.nix { inherit self; };
+      };
+      darwinModules = rec {
+        default = fetch-rs;
+        fetch-rs = import ./nix/darwin.nix { inherit self; };
+      };
+      checks = forEachSupportedSystem (
         { pkgs }:
-        {
-          default = pkgs.mkShell {
-            packages = with pkgs; [
-              rustc
-              cargo
-              rust-analyzer
-              rustfmt
-              clippy
-            ];
-
-            shellHook = ''
-              echo -e "\nfetch-rs Development Environment via Nix Flake\n"
-
-              echo -e "┌───────────────────────────┐"
-              echo -e "│      Useful Commands      │"
-              echo -e "├────────┬──────────────────┤"
-              echo -e "│ Init   │ cargo init       │"
-              echo -e "│ Run    │ cargo run        │"
-              echo -e "│ Check  │ cargo check      │"
-              echo -e "│ Test   │ cargo test       │"
-              echo -e "│ Clippy │ cargo clippy     │"
-              echo -e "│ Format │ rustfmt fileName │"
-              echo -e "└────────┴──────────────────┘"
-            '';
+        nixpkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          nixosModule = import ./nix/tests/nixos.nix {
+            inherit pkgs;
+            nixosModule = self.nixosModules.default;
           };
         }
-      );
-
-      packages = forEachSupportedSystem (
-        { pkgs }:
-        {
-          default = pkgs.rustPlatform.buildRustPackage {
-            pname = "fetch-rs";
-            version = "0.1.0";
-            src = ./.;
-            cargoHash = "sha256-4MWfKflB6i07iiQs7IgIMcHmvBTuYHK//eHbmmzc2XE=";
-          };
+        # darwin testing approach from https://github.com/Mic92/fast-nix-gc
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+          darwinModule =
+            (import ./nix/tests/darwin.nix {
+              inherit nix-darwin;
+              module = self.darwinModules.default;
+              system = pkgs.stdenv.hostPlatform.system;
+            }).system;
         }
       );
+      darwinConfigurations.ci = import ./nix/tests/darwin.nix {
+        inherit nix-darwin;
+        module = self.darwinModules.default;
+        system = "aarch64-darwin";
+        activate = true;
+      };
     };
 }

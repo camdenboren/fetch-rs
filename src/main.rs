@@ -5,7 +5,7 @@ use fetch_rs::{
     util::ExitCode,
 };
 use octocrab::Octocrab;
-use std::{path::PathBuf, process::exit};
+use std::{env, path::PathBuf, process::exit};
 
 /// Determine whether the machine should be rebuilt by comparing the date
 /// of the latest remote commit vs. the latest local commit
@@ -32,26 +32,52 @@ async fn should_rebuild(
         rebuild = true;
     }
 
-    println!("Latest remote commit time: {}", latest_remote_date);
-    println!("Latest local commit time: {}\n", latest_local_date);
-    println!("All actions succeeded on latest remote commit: {}", status);
-    println!("Rebuilding on latest remote commit: {}", rebuild);
+    tracing::info!("Latest remote commit time: {}", latest_remote_date);
+    tracing::info!("Latest local commit time: {}", latest_local_date);
+    tracing::info!("All actions succeeded on latest remote commit: {}", status);
+    tracing::info!("Rebuilding on latest remote commit: {}", rebuild);
 
     rebuild
 }
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let path = PathBuf::from(CFG_FILE);
-    let config_content = Config::read(path.clone()).unwrap_or("".into());
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    tracing::subscriber::set_global_default(subscriber)?;
+    let cfg_path = env::var("F_RS_CONFIG");
+    if cfg_path.is_err() {
+        tracing::error!("Unable to read $F_RS_CONFIG-is it set? Failed to create initial config");
+        exit(ExitCode::NoOp.into());
+    }
+    let cfg_path = PathBuf::from(cfg_path.unwrap_or_default()).join(CFG_FILE);
+    let config_content = Config::read(cfg_path.clone()).unwrap_or("".into());
     let cfg = Config::deserialize(config_content);
     let octocrab = Octocrab::builder().build()?;
 
     let latest_remote = latest_remote_commit(&octocrab, cfg.clone()).await;
-    let latest_remote_date = latest_remote.commit.author.as_ref().unwrap().date.unwrap();
+    let author = match latest_remote.commit.author.as_ref() {
+        Some(a) => a,
+        None => {
+            tracing::error!("No author found for latest remote commit");
+            exit(ExitCode::NoOp.into());
+        }
+    };
+    let latest_remote_date = match author.date {
+        Some(d) => d,
+        None => {
+            tracing::error!("No date found in latest remote commit author metadata");
+            exit(ExitCode::NoOp.into());
+        }
+    };
 
     let latest_run = latest_run(&octocrab, latest_remote.clone(), cfg.clone()).await;
-    let status = latest_run.conclusion.unwrap_or("".into());
+    let status = match latest_run.conclusion {
+        Some(c) => c.trim().to_owned(),
+        None => {
+            tracing::error!("No conclusion found in latest run's metadata");
+            exit(ExitCode::NoOp.into());
+        }
+    };
     let status = status.as_ref();
 
     match status {
@@ -62,15 +88,16 @@ async fn main() -> Result<(), anyhow::Error> {
                 switch(cfg.clone());
                 fetch(cfg);
             } else {
+                tracing::info!("On newer commit: doing nothing");
                 exit(ExitCode::NoOp.into())
             }
         }
         "failure" => {
-            eprintln!("Workflow failed: doing nothing.");
+            tracing::info!("Workflow failed: doing nothing.");
             exit(ExitCode::NoOp.into())
         }
         _ => {
-            eprintln!("Unknown status for workflow: doing nothing.");
+            tracing::info!("Unknown status for workflow: doing nothing.");
             exit(ExitCode::NoOp.into())
         }
     }

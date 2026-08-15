@@ -1,0 +1,64 @@
+name: test
+
+on:
+  push:
+    paths-ignore:
+      - "**/README.md"
+      - ".github/*.md"
+  pull_request:
+    paths-ignore:
+      - "**/README.md"
+      - ".github/*.md"
+
+jobs:
+  nixos:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: camdenboren
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      - run: nix build .#checks.x86_64-linux.nixosModule
+
+  nix-darwin:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: camdenboren
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      - run: nix build .#checks.aarch64-darwin.darwinModule
+
+      - name: Prepare nix-darwin activation
+        run: |
+          for file in /etc/bashrc /etc/zshrc /etc/zshenv /etc/bash.bashrc; do
+            if [[ -e "$file" ]]; then
+              sudo mv "$file" "$file.before-nix-darwin"
+            fi
+          done
+
+      - name: Activate the test configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo env "NIX_CONFIG=access-tokens = github.com=$GH_TOKEN" \
+            nix run github:nix-darwin/nix-darwin -- switch --flake '.#ci'
+
+      - name: Run the testScript
+        run: /run/current-system/sw/bin/testScript

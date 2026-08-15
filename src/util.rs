@@ -1,8 +1,7 @@
-use crate::config::Config;
 use anyhow::anyhow;
 #[cfg(not(target_os = "macos"))]
 use std::process::Stdio;
-use std::{io::stdin, process::Command};
+use std::{env, process::Command};
 
 pub enum ExitCode {
     Failure = 1,
@@ -13,15 +12,6 @@ impl From<ExitCode> for i32 {
     fn from(code: ExitCode) -> Self {
         code as i32
     }
-}
-
-/// Prompt the user for input and return it
-pub fn user_input(message: &str) -> String {
-    println!("{}", message);
-    let mut buffer = String::new();
-    let stdin = stdin(); // We get `Stdin` here.
-    stdin.read_line(&mut buffer).unwrap();
-    buffer.trim().into()
 }
 
 /// Retrieve the current system's name from its configuration
@@ -57,6 +47,7 @@ fn system_name() -> Result<String, anyhow::Error> {
         .map_err(|e| anyhow!("Unable to stringify xargs output: {}", e))
 }
 
+/// Retrieve the current system's name from its configuration
 #[cfg(target_os = "macos")]
 fn system_name() -> Result<String, anyhow::Error> {
     let scutil_output = Command::new("scutil")
@@ -68,12 +59,17 @@ fn system_name() -> Result<String, anyhow::Error> {
 }
 
 /// Send a notification via ntfy-sh
-pub fn notify(cfg: Config) {
+pub fn notify() {
+    let url = env::var("F_RS_NTFY_URL");
+    if url.is_err() {
+        tracing::error!("Unable to read $F_RS_NTFY_URL-is it set? Failed to notify");
+        return;
+    }
+    let url = url.unwrap_or_default();
     let message = match system_name() {
         Ok(host) => &format!("Rebuild failed on {}", host),
         _ => "Rebuild failed",
     };
-    let url = format!("{}/{}", cfg.ntfy_url, cfg.ntfy_topic);
     let mut url_sequence: Vec<&str> = Vec::new();
     if url.contains("https") {
         url_sequence.push("-L");
@@ -82,21 +78,30 @@ pub fn notify(cfg: Config) {
     let mut args = vec!["-d", message];
     args.append(&mut url_sequence);
 
-    println!("Notifying via ntfy-sh server at: {}", url);
-    let notify_output = Command::new("curl")
-        .args(args)
-        .output()
-        .expect("Failed to notify");
+    tracing::info!("Notifying via ntfy-sh");
+    let notify_output = match Command::new("curl").args(args).output() {
+        Ok(output) => output,
+        Err(e) => {
+            tracing::error!("Failed to send ntfy notification: {}", e);
+            return;
+        }
+    };
     if notify_output.status.success() {
-        let notify_output_stdout =
-            String::from_utf8(notify_output.stdout).expect("Unable to stringify notify_output");
-        println!("  {}", notify_output_stdout);
+        let notify_output_stdout = String::from_utf8(notify_output.stdout).unwrap_or_default();
+        if !notify_output_stdout.trim().is_empty() {
+            tracing::info!("ntfy-sh response: {}", notify_output_stdout.trim());
+        } else {
+            tracing::info!("ntfy-sh notification sent successfully (no output)");
+        }
     } else {
-        let notify_output_stderr =
-            String::from_utf8(notify_output.stderr).expect("Unable to stringify notify_output");
-        eprintln!(
-            "  Error encountered while notifying: {}",
-            notify_output_stderr
-        );
+        let notify_output_stderr = String::from_utf8(notify_output.stderr).unwrap_or_default();
+        if !notify_output_stderr.trim().is_empty() {
+            tracing::error!(
+                "ntfy-sh notification failed (stderr): {}",
+                notify_output_stderr.trim()
+            );
+        } else {
+            tracing::error!("ntfy-sh notification failed (no stderr output)");
+        }
     }
 }
