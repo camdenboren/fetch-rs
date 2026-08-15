@@ -32,16 +32,18 @@ async fn should_rebuild(
         rebuild = true;
     }
 
-    println!("Latest remote commit time: {}", latest_remote_date);
-    println!("Latest local commit time: {}\n", latest_local_date);
-    println!("All actions succeeded on latest remote commit: {}", status);
-    println!("Rebuilding on latest remote commit: {}", rebuild);
+    tracing::info!("Latest remote commit time: {}", latest_remote_date);
+    tracing::info!("Latest local commit time: {}\n", latest_local_date);
+    tracing::info!("All actions succeeded on latest remote commit: {}", status);
+    tracing::info!("Rebuilding on latest remote commit: {}", rebuild);
 
     rebuild
 }
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    let subscriber = tracing_subscriber::FmtSubscriber::new();
+    tracing::subscriber::set_global_default(subscriber)?;
     let path = PathBuf::from(CFG_FILE);
     let config_content = Config::read(path.clone()).unwrap_or("".into());
     let cfg = Config::deserialize(config_content);
@@ -66,11 +68,11 @@ async fn main() -> Result<(), anyhow::Error> {
             }
         }
         "failure" => {
-            eprintln!("Workflow failed: doing nothing.");
+            tracing::info!("Workflow failed: doing nothing.");
             exit(ExitCode::NoOp.into())
         }
         _ => {
-            eprintln!("Unknown status for workflow: doing nothing.");
+            tracing::info!("Unknown status for workflow: doing nothing.");
             exit(ExitCode::NoOp.into())
         }
     }

@@ -1,6 +1,6 @@
 # fetch-rs
 
-Like deploy-rs, except you just fetch and rebuild the most recent commit
+Like [deploy-rs](https://github.com/serokell/deploy-rs), except you just fetch and rebuild the most recent commit
 
 This tool may be generalized to a degree via configuration (created w/ user input on first run), and even integrates w/ [ntfy.sh](https://ntfy.sh) to enable push notifications on build failure
 

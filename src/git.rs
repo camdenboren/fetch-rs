@@ -21,7 +21,7 @@ pub async fn latest_remote_commit(octocrab: &Octocrab, cfg: Config) -> RepoCommi
     {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Failed to fetch latest remote commit list: {}", e);
+            tracing::info!("Failed to fetch latest remote commit list: {}", e);
             exit(ExitCode::NoOp.into());
         }
     };
@@ -29,7 +29,7 @@ pub async fn latest_remote_commit(octocrab: &Octocrab, cfg: Config) -> RepoCommi
     match latest_remote.items.first() {
         Some(c) => c.clone(),
         None => {
-            eprintln!("No commits found in repository");
+            tracing::info!("No commits found in repository");
             exit(ExitCode::NoOp.into());
         }
     }
@@ -75,6 +75,19 @@ pub async fn latest_local_date(octocrab: &Octocrab, cfg: Config) -> DateTime<Utc
 
 /// Retrieve the name of the local checked-out branch
 pub fn local_branch(cfg: Config) -> String {
+    // ensure we can run git ops on the flake dir
+    // this should probably be refactored to a distinct function
+    // that checks the value before blindly setting
+    Command::new("git")
+        .args([
+            "config",
+            "--global",
+            "--add",
+            "safe.directory",
+            "/home/camdenboren/etc/nixos",
+        ])
+        .output()
+        .expect("Unable to add flake_dir to git's safe directories");
     let local_branch = Command::new("git")
         .args([
             "-C",
@@ -103,7 +116,7 @@ pub async fn latest_run(octocrab: &Octocrab, commit: RepoCommit, cfg: Config) ->
     {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Failed to fetch latest workflow run: {}", e);
+            tracing::info!("Failed to fetch latest workflow run: {}", e);
             exit(ExitCode::NoOp.into());
         }
     };
@@ -111,7 +124,7 @@ pub async fn latest_run(octocrab: &Octocrab, commit: RepoCommit, cfg: Config) ->
     match latest_run.items.first() {
         Some(r) => r.clone(),
         None => {
-            eprintln!("No workflow runs found for the given commit");
+            tracing::info!("No workflow runs found for the given commit");
             exit(ExitCode::NoOp.into());
         }
     }
@@ -119,7 +132,7 @@ pub async fn latest_run(octocrab: &Octocrab, commit: RepoCommit, cfg: Config) ->
 
 /// Switch to the main branch and fetch the most recent commit
 pub fn switch(cfg: Config) {
-    println!("\nSwitching to {}", cfg.branch);
+    tracing::info!("Switching to {}", cfg.branch);
     let switch_output = Command::new("git")
         .args(["-C", cfg.flake_dir.as_ref(), "switch", cfg.branch.as_ref()])
         .output()
@@ -127,24 +140,25 @@ pub fn switch(cfg: Config) {
     if switch_output.status.success() {
         let switch_output_stdout =
             String::from_utf8(switch_output.stdout).expect("Unable to stringify switch_output");
-        println!("  {}", switch_output_stdout);
+        tracing::info!("{}", switch_output_stdout);
     } else {
         let switch_output_stderr =
             String::from_utf8(switch_output.stderr).expect("Unable to stringify switch_output");
-        eprintln!(
-            "  Error encountered while switching branches, doing nothing: {}",
+        tracing::info!(
+            "Error encountered while switching branches, doing nothing: {}",
             switch_output_stderr
         );
         if cfg.notify {
-            notify(cfg);
+            notify(cfg.clone());
         }
+        tracing::error!("Failed to switch to {} branch", cfg.branch);
         exit(ExitCode::Failure.into());
     }
 }
 
 /// Fetch the most recent commit
 pub fn fetch(cfg: Config) {
-    println!("Fetching latest commit on {}", cfg.branch);
+    tracing::info!("Fetching latest commit on {}", cfg.branch);
     let fetch_output = Command::new("git")
         .args(["-C", cfg.flake_dir.as_ref(), "fetch"])
         .output()
@@ -152,17 +166,18 @@ pub fn fetch(cfg: Config) {
     if fetch_output.status.success() {
         let fetch_output_stdout =
             String::from_utf8(fetch_output.stdout).expect("Unable to stringify fetch_output");
-        println!("  {}", fetch_output_stdout);
+        tracing::info!("{}", fetch_output_stdout);
     } else {
         let fetch_output_stderr =
             String::from_utf8(fetch_output.stderr).expect("Unable to stringify fetch_output");
-        eprintln!(
-            "  Error encountered while fetching latest, doing nothing: {}",
+        tracing::info!(
+            "Error encountered while fetching latest, doing nothing: {}",
             fetch_output_stderr
         );
         if cfg.notify {
             notify(cfg);
         }
+        tracing::error!("Failed to fetch latest commit");
         exit(ExitCode::Failure.into());
     }
 }

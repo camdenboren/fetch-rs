@@ -17,7 +17,7 @@ impl From<ExitCode> for i32 {
 
 /// Prompt the user for input and return it
 pub fn user_input(message: &str) -> String {
-    println!("{}", message);
+    tracing::info!("{}", message);
     let mut buffer = String::new();
     let stdin = stdin(); // We get `Stdin` here.
     stdin.read_line(&mut buffer).unwrap();
@@ -82,7 +82,7 @@ pub fn notify(cfg: Config) {
     let mut args = vec!["-d", message];
     args.append(&mut url_sequence);
 
-    println!("Notifying via ntfy-sh server at: {}", url);
+    tracing::info!("Notifying via ntfy-sh server at: {}", url);
     let notify_output = Command::new("curl")
         .args(args)
         .output()
@@ -90,12 +90,12 @@ pub fn notify(cfg: Config) {
     if notify_output.status.success() {
         let notify_output_stdout =
             String::from_utf8(notify_output.stdout).expect("Unable to stringify notify_output");
-        println!("  {}", notify_output_stdout);
+        tracing::info!("{}", notify_output_stdout);
     } else {
         let notify_output_stderr =
             String::from_utf8(notify_output.stderr).expect("Unable to stringify notify_output");
-        eprintln!(
-            "  Error encountered while notifying: {}",
+        tracing::info!(
+            "Error encountered while notifying: {}",
             notify_output_stderr
         );
     }

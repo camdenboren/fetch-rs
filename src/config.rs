@@ -42,7 +42,7 @@ impl Config {
         match toml::from_str(&config_content) {
             Ok(config) => config,
             Err(_) => {
-                eprintln!();
+                tracing::info!("Failed to deserialize configuration-passing the default");
                 Config::new("", "", "")
             }
         }
@@ -67,7 +67,9 @@ impl Config {
             Ok(_) => (),
             Err(_) => {
                 config_content = String::from("");
-                eprintln!();
+                tracing::info!(
+                    "Failed to parse the content of the configuration file-defaulting to nothing"
+                );
             }
         }
 
@@ -76,7 +78,7 @@ impl Config {
 
     /// Create the default configuration content
     fn create() {
-        println!(
+        tracing::info!(
             "Running first time setup-let's start with some basic info on your GitHub-based nix config\n"
         );
         let mut flake =
@@ -87,7 +89,7 @@ impl Config {
         let config_content = Config::serialize(&flake, &owner, &repo);
         let path = PathBuf::from(CFG_FILE);
 
-        println!(
+        tracing::info!(
             "\nHere's your initial config:\n{}\nTo proceed, write it to: {}\nFeel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)",
             config_content,
             path.display()

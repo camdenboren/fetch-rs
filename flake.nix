@@ -10,7 +10,7 @@
   };
 
   outputs =
-    { nixpkgs, ... }:
+    { self, nixpkgs }:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -64,9 +64,14 @@
             pname = "fetch-rs";
             version = "0.1.0";
             src = ./.;
-            cargoHash = "sha256-4MWfKflB6i07iiQs7IgIMcHmvBTuYHK//eHbmmzc2XE=";
+            cargoHash = "sha256-xzGKOrKmlD4DKOfISdkQ8s5jfUj+TdgUGMMyG3Lhm04=";
           };
         }
       );
+
+      nixosModules = rec {
+        default = fetch-rs;
+        fetch-rs = import ./nixos-module.nix { inherit self; };
+      };
     };
 }
