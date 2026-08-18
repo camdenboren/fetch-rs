@@ -7,7 +7,89 @@ use octocrab::{
     Octocrab,
     models::{repos::RepoCommit, workflows::Run},
 };
-use std::process::{Command, exit};
+use std::{
+    path::PathBuf,
+    process::{Command, exit},
+};
+
+/// Create the git config and add the flake as a safe directory
+pub fn git_config(git_file_path: PathBuf, flake_dir: String) {
+    if std::fs::metadata(git_file_path.clone()).is_err() {
+        match std::fs::write(git_file_path.clone(), "") {
+            Ok(_) => tracing::info!(
+                "Wrote initial git config to: {} - feel free to adjust specific settings",
+                git_file_path.display()
+            ),
+            Err(_) => tracing::info!("Failed to create git config file"),
+        }
+    }
+
+    // ensure we can run git ops on the flake dir
+    // this should probably be refactored to a distinct function
+    // that checks the value before blindly setting
+    match Command::new("git")
+        .args([
+            "config",
+            "--global",
+            "--add",
+            "safe.directory",
+            flake_dir.as_ref(),
+        ])
+        .output()
+    {
+        Ok(_) => tracing::info!("Added flake_dir as a safe directory"),
+        Err(_) => tracing::info!("Failed to add flake_dir as a safe directory"),
+    }
+}
+
+/// Retrieve the remote origin of the repo
+pub fn origin(flake_dir: String) -> Vec<String> {
+    let origin_output = Command::new("git")
+        .args([
+            "-C",
+            flake_dir.as_ref(),
+            "config",
+            "--get",
+            "remote.origin.url",
+        ])
+        .output();
+    if origin_output.is_err() {
+        tracing::error!("Unable to get remote origin's URL, doing nothing");
+        exit(ExitCode::NoOp.into())
+    }
+    let origin_output = String::from_utf8(origin_output.unwrap().stdout)
+        .expect("Unable to stringify remote origin");
+    let origin_output = origin_output.trim();
+    let mut path = if let Some(idx) = origin_output.find("://") {
+        &origin_output[idx + 3..]
+    } else {
+        origin_output
+    };
+
+    if path.starts_with("git@github.com:") {
+        path = &path["git@github.com:".len()..];
+    } else if path.starts_with("github.com/") {
+        path = &path["github.com/".len()..];
+    } else if let Some(idx) = path.find("/github.com/") {
+        path = &path[idx + "/github.com/".len()..];
+    } else {
+        // Not a GitHub URL we understand
+        tracing::info!(
+            "Unable to identify the owner of the remote origin: {}",
+            path,
+        );
+        exit(ExitCode::NoOp.into());
+    }
+
+    let path = if let Some(stripped) = path.strip_suffix(".git") {
+        stripped
+    } else {
+        path
+    };
+
+    let v_ref: Vec<&str> = path.split('/').collect();
+    v_ref.iter().map(|s| (*s).to_owned()).collect()
+}
 
 /// Fetch the latest remote commit
 pub async fn latest_remote_commit(octocrab: &Octocrab, cfg: Config) -> RepoCommit {
@@ -75,19 +157,6 @@ pub async fn latest_local_date(octocrab: &Octocrab, cfg: Config) -> DateTime<Utc
 
 /// Retrieve the name of the local checked-out branch
 pub fn local_branch(cfg: Config) -> String {
-    // ensure we can run git ops on the flake dir
-    // this should probably be refactored to a distinct function
-    // that checks the value before blindly setting
-    Command::new("git")
-        .args([
-            "config",
-            "--global",
-            "--add",
-            "safe.directory",
-            "/home/camdenboren/etc/nixos",
-        ])
-        .output()
-        .expect("Unable to add flake_dir to git's safe directories");
     let local_branch = Command::new("git")
         .args([
             "-C",

@@ -1,5 +1,5 @@
 use fetch_rs::{
-    config::{CFG_FILE, Config},
+    config::{CFG_DIR, CFG_FILE, Config},
     util::*,
 };
 use std::{
@@ -8,7 +8,7 @@ use std::{
 };
 
 fn main() {
-    let path = PathBuf::from(CFG_FILE);
+    let path = PathBuf::from(CFG_DIR).join(CFG_FILE);
     let config_content = Config::read(path.clone()).unwrap_or("".into());
     let cfg = Config::deserialize(config_content);
 

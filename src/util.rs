@@ -1,8 +1,6 @@
 use crate::config::Config;
 use anyhow::anyhow;
-#[cfg(not(target_os = "macos"))]
-use std::process::Stdio;
-use std::{io::stdin, process::Command};
+use std::process::{Command, Stdio};
 
 pub enum ExitCode {
     Failure = 1,
@@ -15,13 +13,24 @@ impl From<ExitCode> for i32 {
     }
 }
 
-/// Prompt the user for input and return it
-pub fn user_input(message: &str) -> String {
-    tracing::info!("{}", message);
-    let mut buffer = String::new();
-    let stdin = stdin(); // We get `Stdin` here.
-    stdin.read_line(&mut buffer).unwrap();
-    buffer.trim().into()
+/// Return the first user listed under home
+pub fn fallback_user() -> String {
+    let mut ls_proc = Command::new("ls")
+        .arg("/home")
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("");
+    let ls_output = ls_proc.stdout.take().expect("");
+
+    let tail_output = Command::new("tail")
+        .args(["-n", "1"])
+        .stdin(Stdio::from(ls_output))
+        .output()
+        .expect("");
+    let tail_output = String::from_utf8(tail_output.stdout).expect("Unable to stringify ls origin");
+
+    ls_proc.wait().expect("");
+    tail_output.trim().into()
 }
 
 /// Retrieve the current system's name from its configuration
@@ -57,6 +66,7 @@ fn system_name() -> Result<String, anyhow::Error> {
         .map_err(|e| anyhow!("Unable to stringify xargs output: {}", e))
 }
 
+/// Retrieve the current system's name from its configuration
 #[cfg(target_os = "macos")]
 fn system_name() -> Result<String, anyhow::Error> {
     let scutil_output = Command::new("scutil")

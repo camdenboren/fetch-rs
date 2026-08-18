@@ -1,6 +1,6 @@
 use chrono::prelude::*;
 use fetch_rs::{
-    config::{CFG_FILE, Config},
+    config::{CFG_DIR, CFG_FILE, Config},
     git::{fetch, latest_local_date, latest_remote_commit, latest_run, local_branch, switch},
     util::ExitCode,
 };
@@ -44,7 +44,7 @@ async fn should_rebuild(
 async fn main() -> Result<(), anyhow::Error> {
     let subscriber = tracing_subscriber::FmtSubscriber::new();
     tracing::subscriber::set_global_default(subscriber)?;
-    let path = PathBuf::from(CFG_FILE);
+    let path = PathBuf::from(CFG_DIR).join(CFG_FILE);
     let config_content = Config::read(path.clone()).unwrap_or("".into());
     let cfg = Config::deserialize(config_content);
     let octocrab = Octocrab::builder().build()?;
@@ -64,6 +64,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 switch(cfg.clone());
                 fetch(cfg);
             } else {
+                tracing::info!("On newer commit: doing nothing");
                 exit(ExitCode::NoOp.into())
             }
         }

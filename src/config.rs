@@ -1,8 +1,17 @@
-use crate::util::{ExitCode, user_input};
+use crate::{
+    git::{git_config, origin},
+    util::fallback_user,
+};
 use serde::{Deserialize, Serialize};
-use std::{env, fs::File, io::Read, path::PathBuf, process::exit};
+use std::{env, fs::File, io::Read, path::PathBuf};
 
-pub const CFG_FILE: &str = "/etc/fetch-rs/config.toml";
+pub const CFG_DIR: &str = "/etc/fetch-rs";
+pub const CFG_FILE: &str = "config.toml";
+pub const GIT_CFG_FILE: &str = ".gitconfig";
+#[cfg(not(target_os = "macos"))]
+const FALLBACK_HOME: &str = "/home";
+#[cfg(target_os = "macos")]
+const FALLBACK_HOME: &str = "/Users";
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -50,21 +59,24 @@ impl Config {
 
     /// Serialize the raw configuration content
     fn serialize(flake_dir: &str, owner: &str, repo: &str) -> String {
-        let config = Config::new(flake_dir, owner, repo);
+        // $F_RS_FLAKE takes precedence
+        let mut config = Config::new(flake_dir, owner, repo);
+        if let Ok(flake_var) = env::var("F_RS_FLAKE") {
+            config.flake_dir = Self::flake_dir(flake_var, fallback_user());
+        }
         toml::to_string(&config).unwrap_or_default()
     }
 
     /// Read the raw configuration content at the given path, creating the file if needed.
     pub fn read(path: PathBuf) -> Result<String, anyhow::Error> {
         if std::fs::metadata(&path).is_err() {
-            Config::create();
-            exit(ExitCode::NoOp.into())
+            Config::write();
         }
 
         let mut config_file = File::open(path)?;
         let mut config_content = String::new();
         match config_file.read_to_string(&mut config_content) {
-            Ok(_) => (),
+            Ok(_) => tracing::info!("Read config content"),
             Err(_) => {
                 config_content = String::from("");
                 tracing::info!(
@@ -77,33 +89,44 @@ impl Config {
     }
 
     /// Create the default configuration content
-    fn create() {
-        tracing::info!(
-            "Running first time setup-let's start with some basic info on your GitHub-based nix config\n"
-        );
-        let mut flake =
-            user_input("Flake Directory (`~` will be replaced with your current $HOME): ");
-        let owner = user_input("\nRepo Owner: ");
-        let repo = user_input("\nRepo Name: ");
-        flake = Self::flake_dir(flake, owner.clone());
-        let config_content = Config::serialize(&flake, &owner, &repo);
-        let path = PathBuf::from(CFG_FILE);
+    fn write() {
+        let dir_path = PathBuf::from(CFG_DIR);
+        let file_path = dir_path.join(CFG_FILE);
+        let git_file_path = dir_path.join(GIT_CFG_FILE);
+        let mut flake = env::var("F_RS_FLAKE")
+            .expect("Unable to create initial config due missing $F_RS_FLAKE - doing nothing");
+        flake = Self::flake_dir(flake, fallback_user());
+        git_config(git_file_path, flake.clone());
 
-        tracing::info!(
-            "\nHere's your initial config:\n{}\nTo proceed, write it to: {}\nFeel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)",
-            config_content,
-            path.display()
-        )
+        let origin = origin(flake.clone());
+        let owner = origin.first().expect("");
+        let repo = origin.last().expect("");
+        let config_content = Config::serialize(&flake, owner, repo);
+
+        if std::fs::metadata(&dir_path).is_err() {
+            tracing::info!("Launched without access to the config directory");
+        }
+        if std::fs::metadata(file_path.clone()).is_err() {
+            match std::fs::write(file_path.clone(), &config_content) {
+                Ok(_) => tracing::info!(
+                    "Wrote initial config to: {} - feel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)",
+                    file_path.display()
+                ),
+                Err(_) => tracing::info!("Failed to create config file"),
+            }
+        }
     }
 
-    /// Retrieve the NixOS / nix-darwin config directory
-    fn flake_dir(mut dir: String, owner: String) -> String {
+    /// Replace `~` w/ the first user listed
+    fn flake_dir(mut dir: String, fallback_user: String) -> String {
         if dir.starts_with("~") {
-            let fallback_home_dir = format!("/home/{}", owner);
-            let home_dir = env::home_dir().unwrap_or(fallback_home_dir.clone().into());
-            let home_dir = home_dir.to_str().unwrap_or(fallback_home_dir.as_str());
+            tracing::info!(
+                "Defaulting to {} user since `~` is ambiguous",
+                fallback_user
+            );
+            let fallback_home_dir = format!("{}/{}", FALLBACK_HOME, fallback_user);
             dir.remove(0);
-            format!("{}{}", home_dir, dir)
+            format!("{}{}", fallback_home_dir, dir)
         } else {
             dir
         }

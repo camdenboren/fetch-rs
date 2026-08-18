@@ -10,6 +10,7 @@ let
   cfg = config.services.fetch-rs;
   defaultUser = "fetch-rs";
   defaultGroup = "fetch-rs";
+  configDir = "/etc/fetch-rs";
 in
 {
   options.services.fetch-rs = {
@@ -20,6 +21,11 @@ in
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       defaultText = lib.literalExpression "inputs.fetch-rs.packages.${pkgs.stdenv.hostPlatform.system}.default";
       description = "The fetch-rs package to run.";
+    };
+
+    flakePath = lib.mkOption {
+      type = lib.types.str;
+      description = "Absolute path to the directory containig your flake-based Nix configuration (required).";
     };
 
     gitPackage = lib.mkPackageOption pkgs "git" { };
@@ -55,18 +61,8 @@ in
       groups = lib.mkIf (cfg.group == defaultGroup) { ${defaultGroup} = { }; };
     };
 
-    # this should probably be handled by the app itself,
-    # but it works for now
     systemd.tmpfiles.rules = [
-      "d /etc/fetch-rs 0750 fetch-rs fetch-rs -"
-      "f /etc/fetch-rs/.gitconfig 0644 fetch-rs fetch-rs -"
-
-      # Traversal permission on private parents.
-      "a+ /home/camdenboren     - - - - u:fetch-rs:--x"
-      "a+ /home/camdenboren/etc - - - - u:fetch-rs:--x"
-
-      # Existing contents plus inheritance for new contents.
-      "A+ /home/camdenboren/etc/nixos - - - - u:fetch-rs:r-X,d:u:fetch-rs:r-X"
+      "d ${configDir} 0750 ${cfg.user} ${cfg.group} -"
     ];
 
     systemd.services.fetch-rs = {
@@ -74,9 +70,10 @@ in
       wantedBy = [ ];
       after = [ "network.target" ];
       onSuccess = [ "fetch-rs-rebuild.service" ];
-      path = [ "${cfg.gitPackage}" ];
+      path = [ cfg.gitPackage ];
       environment = {
-        GIT_CONFIG_GLOBAL = "/etc/fetch-rs/.gitconfig";
+        F_RS_FLAKE = cfg.flakePath;
+        GIT_CONFIG_GLOBAL = "${configDir}/.gitconfig";
       };
 
       serviceConfig = {
@@ -89,15 +86,9 @@ in
         PrivateTmp = true;
         ProtectHome = "tmpfs";
         ProtectSystem = "strict";
-        ReadWritePaths = [
-          "/etc/fetch-rs"
-          "/etc/fetch-rs/.gitconfig"
-        ];
-        BindReadOnlyPaths = [
-          "/home/camdenboren/etc/nixos"
-        ];
+        ReadWritePaths = [ configDir ];
+        BindReadOnlyPaths = [ cfg.flakePath ];
         UMask = "0027";
-        WorkingDirectory = "/etc/fetch-rs";
       };
     };
 
