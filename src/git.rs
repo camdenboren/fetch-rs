@@ -213,14 +213,14 @@ pub fn switch(cfg: Config) {
     } else {
         let switch_output_stderr =
             String::from_utf8(switch_output.stderr).expect("Unable to stringify switch_output");
-        tracing::info!(
-            "Error encountered while switching branches, doing nothing: {}",
-            switch_output_stderr
-        );
         if cfg.notify {
             notify(cfg.clone());
         }
-        tracing::error!("Failed to switch to {} branch", cfg.branch);
+        tracing::error!(
+            "Failed to switch to {} branch, doing nothing: {}",
+            cfg.branch,
+            switch_output_stderr
+        );
         exit(ExitCode::Failure.into());
     }
 }

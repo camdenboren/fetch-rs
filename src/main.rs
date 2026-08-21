@@ -1,11 +1,11 @@
 use chrono::prelude::*;
 use fetch_rs::{
-    config::{CFG_DIR, CFG_FILE, Config},
+    config::{CFG_FILE, Config},
     git::{fetch, latest_local_date, latest_remote_commit, latest_run, local_branch, switch},
     util::ExitCode,
 };
 use octocrab::Octocrab;
-use std::{path::PathBuf, process::exit};
+use std::{env, path::PathBuf, process::exit};
 
 /// Determine whether the machine should be rebuilt by comparing the date
 /// of the latest remote commit vs. the latest local commit
@@ -44,8 +44,13 @@ async fn should_rebuild(
 async fn main() -> Result<(), anyhow::Error> {
     let subscriber = tracing_subscriber::FmtSubscriber::new();
     tracing::subscriber::set_global_default(subscriber)?;
-    let path = PathBuf::from(CFG_DIR).join(CFG_FILE);
-    let config_content = Config::read(path.clone()).unwrap_or("".into());
+    let cfg_path = env::var("F_RS_CONFIG");
+    if cfg_path.is_err() {
+        tracing::error!("Unable to read $F_RS_CONFIG-is it set? Failed to create initial config");
+        exit(ExitCode::NoOp.into());
+    }
+    let cfg_path = PathBuf::from(cfg_path.unwrap()).join(CFG_FILE);
+    let config_content = Config::read(cfg_path.clone()).unwrap_or("".into());
     let cfg = Config::deserialize(config_content);
     let octocrab = Octocrab::builder().build()?;
 

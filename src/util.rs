@@ -13,26 +13,6 @@ impl From<ExitCode> for i32 {
     }
 }
 
-/// Return the first user listed under home
-pub fn fallback_user() -> String {
-    let mut ls_proc = Command::new("ls")
-        .arg("/home")
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("");
-    let ls_output = ls_proc.stdout.take().expect("");
-
-    let tail_output = Command::new("tail")
-        .args(["-n", "1"])
-        .stdin(Stdio::from(ls_output))
-        .output()
-        .expect("");
-    let tail_output = String::from_utf8(tail_output.stdout).expect("Unable to stringify ls origin");
-
-    ls_proc.wait().expect("");
-    tail_output.trim().into()
-}
-
 /// Retrieve the current system's name from its configuration
 #[cfg(not(target_os = "macos"))]
 fn system_name() -> Result<String, anyhow::Error> {

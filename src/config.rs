@@ -1,17 +1,8 @@
-use crate::{
-    git::{git_config, origin},
-    util::fallback_user,
-};
+use crate::{git::origin, util::ExitCode};
 use serde::{Deserialize, Serialize};
-use std::{env, fs::File, io::Read, path::PathBuf};
+use std::{env, fs::File, io::Read, path::PathBuf, process::exit};
 
-pub const CFG_DIR: &str = "/etc/fetch-rs";
 pub const CFG_FILE: &str = "config.toml";
-pub const GIT_CFG_FILE: &str = ".gitconfig";
-#[cfg(not(target_os = "macos"))]
-const FALLBACK_HOME: &str = "/home";
-#[cfg(target_os = "macos")]
-const FALLBACK_HOME: &str = "/Users";
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -62,7 +53,7 @@ impl Config {
         // $F_RS_FLAKE takes precedence
         let mut config = Config::new(flake_dir, owner, repo);
         if let Ok(flake_var) = env::var("F_RS_FLAKE") {
-            config.flake_dir = Self::flake_dir(flake_var, fallback_user());
+            config.flake_dir = Self::validate_flake_dir(flake_var);
         }
         toml::to_string(&config).unwrap_or_default()
     }
@@ -73,14 +64,15 @@ impl Config {
             Config::write();
         }
 
-        let mut config_file = File::open(path)?;
+        let mut config_file = File::open(path.clone())?;
         let mut config_content = String::new();
         match config_file.read_to_string(&mut config_content) {
             Ok(_) => tracing::info!("Read config content"),
             Err(_) => {
                 config_content = String::from("");
-                tracing::info!(
-                    "Failed to parse the content of the configuration file-defaulting to nothing"
+                tracing::error!(
+                    "Failed to parse the content of the configuration file at {} - defaulting to nothing",
+                    path.display()
                 );
             }
         }
@@ -90,43 +82,51 @@ impl Config {
 
     /// Create the default configuration content
     fn write() {
-        let dir_path = PathBuf::from(CFG_DIR);
-        let file_path = dir_path.join(CFG_FILE);
-        let git_file_path = dir_path.join(GIT_CFG_FILE);
-        let mut flake = env::var("F_RS_FLAKE")
-            .expect("Unable to create initial config due missing $F_RS_FLAKE - doing nothing");
-        flake = Self::flake_dir(flake, fallback_user());
-        git_config(git_file_path, flake.clone());
+        let flake = env::var("F_RS_FLAKE");
+        if flake.is_err() {
+            tracing::error!(
+                "Unable to read $F_RS_FLAKE-is it set? Failed to create initial config"
+            );
+            exit(ExitCode::NoOp.into());
+        }
+        let mut flake = flake.unwrap();
+        let cfg_dir = env::var("F_RS_CONFIG");
+        if cfg_dir.is_err() {
+            tracing::error!(
+                "Unable to read $F_RS_CONFIG-is it set? Failed to create initial config"
+            );
+            exit(ExitCode::NoOp.into());
+        }
+        let cfg_dir = PathBuf::from(cfg_dir.unwrap());
+        let cfg_path = cfg_dir.join(CFG_FILE);
+        flake = Self::validate_flake_dir(flake);
 
         let origin = origin(flake.clone());
         let owner = origin.first().expect("");
         let repo = origin.last().expect("");
         let config_content = Config::serialize(&flake, owner, repo);
 
-        if std::fs::metadata(&dir_path).is_err() {
+        if std::fs::metadata(&cfg_dir).is_err() {
             tracing::info!("Launched without access to the config directory");
         }
-        if std::fs::metadata(file_path.clone()).is_err() {
-            match std::fs::write(file_path.clone(), &config_content) {
+        if std::fs::metadata(cfg_path.clone()).is_err() {
+            match std::fs::write(cfg_path.clone(), &config_content) {
                 Ok(_) => tracing::info!(
                     "Wrote initial config to: {} - feel free to adjust specific settings like (e.g., change branch name, enable notifications, etc.)",
-                    file_path.display()
+                    cfg_path.display()
                 ),
                 Err(_) => tracing::info!("Failed to create config file"),
             }
         }
     }
 
-    /// Replace `~` w/ the first user listed
-    fn flake_dir(mut dir: String, fallback_user: String) -> String {
+    /// Make sure $F_RS_FLAKE doesn't include ambiguous `~`
+    fn validate_flake_dir(dir: String) -> String {
         if dir.starts_with("~") {
-            tracing::info!(
-                "Defaulting to {} user since `~` is ambiguous",
-                fallback_user
+            tracing::error!(
+                "Ambiguous $HOME included in $F_RS_FLAKE. As fetch-rs leverages multiple users, use an absolute path to avoid ambiguity"
             );
-            let fallback_home_dir = format!("{}/{}", FALLBACK_HOME, fallback_user);
-            dir.remove(0);
-            format!("{}{}", fallback_home_dir, dir)
+            exit(ExitCode::NoOp.into());
         } else {
             dir
         }
