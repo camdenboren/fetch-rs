@@ -264,8 +264,11 @@ pub fn switch(cfg: Config) {
     {
         Ok(output) => output,
         Err(e) => {
+            if cfg.notify {
+                notify();
+            }
             tracing::error!("Failed to switch branches: {}", e);
-            exit(ExitCode::NoOp.into());
+            exit(ExitCode::Failure.into());
         }
     };
     if switch_output.status.success() {
@@ -298,13 +301,16 @@ pub fn switch(cfg: Config) {
 pub fn fetch(cfg: Config) {
     tracing::info!("Fetching latest commit on {}", cfg.branch);
     let fetch_output = match Command::new("git")
-        .args(["-C", cfg.flake_dir.as_ref(), "fetch"])
+        .args(["-C", cfg.flake_dir.as_ref(), "pull", "--ff-only"])
         .output()
     {
         Ok(output) => output,
         Err(e) => {
+            if cfg.notify {
+                notify();
+            }
             tracing::error!("Failed to fetch latest commit: {}", e);
-            exit(ExitCode::NoOp.into());
+            exit(ExitCode::Failure.into());
         }
     };
     if fetch_output.status.success() {

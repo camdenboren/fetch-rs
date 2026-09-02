@@ -46,7 +46,7 @@ To enable notifications, set `notify = true` in `config.toml` and put the comple
 F_RS_NTFY_URL=https://ntfy.sh/my-secret-topic
 ```
 
-Then point the module at it (e.g., `services.fetch-rs.secretsFile = "/run/secrets/fetch-rs.env";`). The secrets file must be readable by the configured `user` on nix-darwin. Pass its path as a string, rather than a Nix path literal, so Nix does not copy it into the store.
+Then point the module at it (e.g., `services.fetch-rs.secretsFile = "/run/secrets/fetch-rs.env";`). The secrets file must be readable by the configured `user`. Pass its path as a string, rather than a Nix path literal, so Nix does not copy it into the store.
 
 ## Implementation
 
