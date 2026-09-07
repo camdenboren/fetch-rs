@@ -5,6 +5,6 @@
     pname = "fetch-rs";
     version = "0.1.0";
     src = ../.;
-    cargoHash = "sha256-xzGKOrKmlD4DKOfISdkQ8s5jfUj+TdgUGMMyG3Lhm04=";
+    cargoHash = "sha256-tMM8Onvjp3csO4NoAOtkbeL2czfSgk7ZY1LtC0U6D4c=";
   };
 }

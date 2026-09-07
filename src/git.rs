@@ -2,7 +2,6 @@ use crate::{
     config::Config,
     util::{ExitCode, notify},
 };
-use chrono::prelude::*;
 use octocrab::{
     Octocrab,
     models::{repos::RepoCommit, workflows::Run},
@@ -122,9 +121,8 @@ pub async fn latest_remote_commit(octocrab: &Octocrab, cfg: Config) -> RepoCommi
     }
 }
 
-/// Determine the date of the latest local commit, trying GitHub before falling
-/// back to local metadata
-pub async fn latest_local_date(octocrab: &Octocrab, cfg: Config) -> DateTime<Utc> {
+/// Determine the SHA of the latest local commit
+pub async fn latest_local_sha(cfg: Config) -> String {
     let flake_dir = cfg.flake_dir.as_ref();
     let latest_local_cmd = match Command::new("git")
         .args(["-C", flake_dir, "rev-parse", "HEAD"])
@@ -142,63 +140,7 @@ pub async fn latest_local_date(octocrab: &Octocrab, cfg: Config) -> DateTime<Utc
     } else {
         String::from_utf8(latest_local_cmd.stdout).unwrap_or_default()
     };
-    let latest_local = latest_local_stdout.trim();
-
-    // grabs the local computer's stored time of the git commit in case
-    // we can't grab it remotely
-    let latest_local_date_backup_cmd = match Command::new("git")
-        .args(["-C", flake_dir, "show", "-s", "--format=%ci", latest_local])
-        .output()
-    {
-        Ok(output) => output,
-        Err(e) => {
-            tracing::error!("Unable to get date of latest_local commit: {}", e);
-            exit(ExitCode::NoOp.into());
-        }
-    };
-    let latest_local_date_backup_stdout = if latest_local_date_backup_cmd.stdout.is_empty() {
-        tracing::error!("Unable to get date of latest_local commit: command produced no output");
-        exit(ExitCode::NoOp.into());
-    } else {
-        String::from_utf8(latest_local_date_backup_cmd.stdout).unwrap_or_default()
-    };
-    let latest_local_date_backup = latest_local_date_backup_stdout.trim();
-
-    // Attempt to fetch the local commit's metadata from GitHub, falling
-    // back to `latest_local_date_backup` if any step fails
-    match octocrab
-        .commits(cfg.owner, cfg.repo)
-        .get(latest_local)
-        .await
-    {
-        Ok(commit) => {
-            let author = match commit.commit.author {
-                Some(a) => a,
-                None => {
-                    tracing::error!("No author found for latest local commit");
-                    exit(ExitCode::NoOp.into());
-                }
-            };
-            match author.date {
-                Some(d) => d,
-                None => {
-                    tracing::error!("No date found in latest local commit author metadata");
-                    exit(ExitCode::NoOp.into());
-                }
-            }
-        }
-        Err(e) => {
-            tracing::info!("Failed to fetch local commit from GitHub: {}", e);
-            chrono::DateTime::parse_from_str(latest_local_date_backup, "%Y-%m-%d %H:%M:%S %z")
-                .map_or_else(
-                    |e| {
-                        tracing::error!("Failed to parse fallback date: {}", e);
-                        exit(ExitCode::NoOp.into());
-                    },
-                    |dt| dt.with_timezone(&Utc),
-                )
-        }
-    }
+    latest_local_stdout.trim().to_owned()
 }
 
 /// Retrieve the name of the local checked-out branch
@@ -255,7 +197,7 @@ pub async fn latest_run(octocrab: &Octocrab, commit: RepoCommit, cfg: Config) ->
     }
 }
 
-/// Switch to the main branch and fetch the most recent commit
+/// Switch to the configured branch
 pub fn switch(cfg: Config) {
     tracing::info!("Switching to {}", cfg.branch);
     let switch_output = match Command::new("git")
@@ -297,7 +239,7 @@ pub fn switch(cfg: Config) {
     }
 }
 
-/// Fetch the most recent commit
+/// Fetch the most recent commit from the configured branch
 pub fn fetch(cfg: Config) {
     tracing::info!("Fetching latest commit on {}", cfg.branch);
     let fetch_output = match Command::new("git")

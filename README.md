@@ -1,6 +1,6 @@
 # fetch-rs
 
-Like [deploy-rs](https://github.com/serokell/deploy-rs), except you just fetch and rebuild the most recent commit
+Like [deploy-rs](https://github.com/serokell/deploy-rs), except you just fetch and rebuild the most recent commit passing CI
 
 This tool may be generalized via configuration, and even integrates w/ [ntfy.sh](https://ntfy.sh) to enable push notifications on build failure
 
@@ -50,6 +50,12 @@ Then point the module at it (e.g., `services.fetch-rs.secretsFile = "/run/secret
 
 ## Implementation
 
-fetch-rs simply grabs the date of the most recent commit on the branch of your choosing (that passed CI builds) and compares it to the date of your current local commit (regardless of the branch). If the remote branch's commit is more recent, it rebuilds your system
+fetch-rs simply grabs the SHA of the most recent commit on the branch of your choosing (that passed CI builds) and compares it to the SHA of your current local commit (regardless of the branch). If the SHAs disagree, it rebuilds your system
 
-If polled somewhat frequently (e.g., via the default hourly timer) then your machines will be kept in sync w/ successfully built `main` commits. Otherwise, you can remain on whatever feature branch you prefer
+If polled somewhat frequently (e.g., via the default hourly timer) then your machines will be kept in sync w/ successfully built commits on your preferred branch
+
+### Limitations
+
+The primary limitation of the current approach is that fetch-rs implicitly assumes that your latest local commit matches your system's current configuration revision (i.e., `system.configurationRevision`), which may not be the case for several reasons
+
+I plan on decoupling the management of the local flake repo from the local configuration revision, but that will require additional effort in drawing the associated behavioral boundaries
