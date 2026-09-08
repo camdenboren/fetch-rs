@@ -33,17 +33,11 @@ let
     "/sbin"
   ];
   nativePath = lib.concatStringsSep ":" systemPath;
-  fetchPath = "${
-    lib.makeBinPath [
-      cfg.gitPackage
-      pkgs.curl
-    ]
-  }:${nativePath}";
+  fetchPath = "${lib.makeBinPath [ cfg.gitPackage ]}:${nativePath}";
   rebuildPath = "${
     lib.makeBinPath [
       cfg.gitPackage
       cfg.rebuildPackage
-      pkgs.curl
     ]
   }:${nativePath}";
   fetchLabel = "org.nixos.fetch-rs";

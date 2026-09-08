@@ -14,6 +14,11 @@ let
   defaultGitConfigPath = "/root/.gitconfig";
   userHome = "${cfg.homeDirRoot}/${cfg.user}";
   configDir = "${userHome}/.config/fetch-rs";
+  commonPath = [
+    cfg.gitPackage
+    pkgs.curl
+    pkgs.nixos-option
+  ];
   commonEnvironment = {
     F_RS_CONFIG = configDir;
     F_RS_FLAKE = cfg.flakePath;
@@ -118,7 +123,7 @@ in
       wantedBy = [ ];
       after = [ "network.target" ];
       onSuccess = [ "fetch-rs-rebuild.service" ];
-      path = [ cfg.gitPackage ];
+      path = commonPath;
       environment = commonEnvironment;
 
       serviceConfig = {
@@ -154,10 +159,7 @@ in
       description = "fetch-rs rebuild";
       wantedBy = [ ];
       after = [ "fetch-rs.service" ];
-      path = [
-        cfg.gitPackage
-        cfg.rebuildPackage
-      ];
+      path = commonPath ++ [ cfg.rebuildPackage ];
       environment = commonEnvironment // {
         GIT_CONFIG_GLOBAL = cfg.gitConfigPath;
       };
