@@ -14,6 +14,17 @@ impl From<ExitCode> for i32 {
     }
 }
 
+/// Render an error's full source chain rather than just the variant
+pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut rendered = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        rendered.push_str(&format!("\n  caused by: {}", cause));
+        source = cause.source();
+    }
+    rendered
+}
+
 /// Retrieve the current system's name from its configuration
 #[cfg(not(target_os = "macos"))]
 fn system_name() -> Result<String, anyhow::Error> {

@@ -27,8 +27,13 @@ fn main() -> Result<(), anyhow::Error> {
         exit(ExitCode::NoOp.into());
     }
     let git_path = PathBuf::from(git_path.unwrap_or_default());
-    let config_content = Config::read(cfg_path.clone()).unwrap_or("".into());
-    let cfg = Config::deserialize(config_content);
+    let cfg = match Config::read(cfg_path.clone()) {
+        Ok(config_content) => Config::deserialize(config_content),
+        Err(e) => {
+            tracing::error!("Unable to read the configuration file: {e:#}");
+            exit(ExitCode::NoOp.into());
+        }
+    };
 
     if std::fs::metadata(&cfg_path).is_err() {
         tracing::info!("Unable to access cfg path: {}", cfg_path.display());

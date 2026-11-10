@@ -1,6 +1,6 @@
 use crate::{
     config::Config,
-    util::{ExitCode, notify},
+    util::{ExitCode, error_chain, notify},
 };
 use octocrab::{
     Octocrab,
@@ -52,11 +52,17 @@ pub fn origin(flake_dir: String) -> Vec<String> {
             "remote.origin.url",
         ])
         .output();
-    if origin_output.is_err() {
-        tracing::error!("Unable to get remote origin's URL, doing nothing");
-        exit(ExitCode::NoOp.into())
-    }
-    let origin_stdout = match origin_output.ok().map(|o| o.stdout).unwrap_or_default() {
+    let origin_output = match origin_output {
+        Ok(output) => output,
+        Err(e) => {
+            tracing::error!(
+                "Unable to get remote origin's URL, doing nothing: {}",
+                error_chain(&e)
+            );
+            exit(ExitCode::NoOp.into())
+        }
+    };
+    let origin_stdout = match origin_output.stdout {
         s if s.is_empty() => {
             tracing::error!("Unable to get remote origin's URL: command produced no output");
             exit(ExitCode::NoOp.into());
@@ -107,7 +113,10 @@ pub async fn latest_remote_commit(octocrab: &Octocrab, cfg: Config) -> RepoCommi
     {
         Ok(l) => l,
         Err(e) => {
-            tracing::info!("Failed to fetch latest remote commit list: {}", e);
+            tracing::error!(
+                "Failed to fetch latest remote commit list: {}",
+                error_chain(&e)
+            );
             exit(ExitCode::NoOp.into());
         }
     };
@@ -183,7 +192,7 @@ pub async fn latest_run(octocrab: &Octocrab, commit: RepoCommit, cfg: Config) ->
     {
         Ok(r) => r,
         Err(e) => {
-            tracing::info!("Failed to fetch latest workflow run: {}", e);
+            tracing::error!("Failed to fetch latest workflow run: {}", error_chain(&e));
             exit(ExitCode::NoOp.into());
         }
     };

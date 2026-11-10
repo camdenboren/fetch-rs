@@ -16,6 +16,7 @@ let
   configDir = "${userHome}/.config/fetch-rs";
   commonPath = [
     cfg.gitPackage
+    cfg.sshPackage
     pkgs.curl
     pkgs.nixos-option
   ];
@@ -41,6 +42,8 @@ in
     };
 
     gitPackage = lib.mkPackageOption pkgs "git" { };
+
+    sshPackage = lib.mkPackageOption pkgs "openssh" { };
 
     rebuildPackage = lib.mkOption {
       type = lib.types.package;

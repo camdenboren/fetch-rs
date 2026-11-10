@@ -16,8 +16,13 @@ async fn main() -> Result<(), anyhow::Error> {
         exit(ExitCode::NoOp.into());
     }
     let cfg_path = PathBuf::from(cfg_path.unwrap_or_default()).join(CFG_FILE);
-    let config_content = Config::read(cfg_path.clone()).unwrap_or("".into());
-    let cfg = Config::deserialize(config_content);
+    let cfg = match Config::read(cfg_path) {
+        Ok(config_content) => Config::deserialize(config_content),
+        Err(e) => {
+            tracing::error!("Unable to read the configuration file: {e:#}");
+            exit(ExitCode::NoOp.into());
+        }
+    };
     let octocrab = Octocrab::builder().build()?;
 
     let latest_remote = latest_remote_commit(&octocrab, cfg.clone()).await;

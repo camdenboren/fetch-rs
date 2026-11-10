@@ -1,6 +1,6 @@
 # fetch-rs
 
-Like [deploy-rs](https://github.com/serokell/deploy-rs), except you just fetch and rebuild the most recent commit passing CI
+Like [comin](https://github.com/nlewo/comin), except it's CI aware
 
 This tool may be generalized via configuration, and even integrates w/ [ntfy.sh](https://ntfy.sh) to enable push notifications on build failure
 
