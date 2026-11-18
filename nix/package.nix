@@ -5,6 +5,11 @@
     pname = "fetch-rs";
     version = "0.1.0";
     src = ../.;
-    cargoHash = "sha256-tMM8Onvjp3csO4NoAOtkbeL2czfSgk7ZY1LtC0U6D4c=";
+    cargoHash = "sha256-6t1KsAoZFCNyHZ9mCRHW/5u1Sm94ZVhmk/+1brj4TZc=";
+
+    # link aws-lc-sys against nixpkgs' AWS-LC instead of building/
+    # vendoring its own
+    buildInputs = [ pkgs.aws-lc ];
+    nativeBuildInputs = [ pkgs.pkg-config ];
   };
 }

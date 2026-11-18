@@ -8,6 +8,8 @@
       rust-analyzer
       rustfmt
       clippy
+      cargo-edit
+      cargo-audit
     ];
 
     shellHook = ''

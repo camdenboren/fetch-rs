@@ -47,14 +47,14 @@
       };
       checks = forEachSupportedSystem (
         { pkgs }:
-        nixpkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+        nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           nixosModule = import ./nix/tests/nixos.nix {
             inherit pkgs;
             nixosModule = self.nixosModules.default;
           };
         }
         # darwin testing approach from https://github.com/Mic92/fast-nix-gc
-        // nixpkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
           darwinModule =
             (import ./nix/tests/darwin.nix {
               inherit nix-darwin;
